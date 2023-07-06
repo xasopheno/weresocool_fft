@@ -1,3 +1,4 @@
+#[cfg(test)]
 mod test_fft {
     use crate::*;
     use num_complex::Complex;
