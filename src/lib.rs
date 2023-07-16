@@ -2,6 +2,7 @@ pub mod helpers;
 mod test_fft;
 mod test_mel;
 pub mod wsc_fft;
+pub use crate::wsc_fft::WscFFT;
 use num_complex::Complex;
 use plotters::prelude::*;
 use std::f32::consts::PI;
@@ -28,6 +29,12 @@ pub fn fft_in_place(x: &mut [Complex<f32>]) {
 pub fn hann_window(size: usize) -> Vec<f32> {
     (0..size)
         .map(|i| 0.5 * (1.0 - (2.0 * PI * i as f32 / (size as f32 - 1.0)).cos()))
+        .collect()
+}
+
+pub fn hamming_window(size: usize) -> Vec<f32> {
+    (0..size)
+        .map(|i| 0.54 - 0.46 * (2.0 * PI * i as f32 / (size as f32 - 1.0)).cos())
         .collect()
 }
 

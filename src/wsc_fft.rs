@@ -1,6 +1,10 @@
 use crate::*;
 use core::f32::consts::PI;
 use crossbeam_channel as channel;
+// use ringbuf::RingBuffer;
+use rustfft::num_complex::Complex;
+use rustfft::num_traits::Zero;
+use rustfft::FftPlanner;
 use std::sync::{Arc, RwLock};
 use std::thread;
 use weresocool_double_buffer::{DoubleBuffer, DoubleBufferError};
@@ -8,12 +12,13 @@ use weresocool_double_buffer::{DoubleBuffer, DoubleBufferError};
 pub struct WscFFT {
     buffer: DoubleBuffer<f32>,
     window: Vec<f32>,
+    fft: Arc<dyn rustfft::Fft<f32>>,
 }
 
 impl WscFFT {
     pub fn spawn(
         buffer_size: usize,
-        r: channel::Receiver<Vec<f32>>,
+        receiver: channel::Receiver<Vec<f32>>,
     ) -> (
         Box<dyn Fn() -> Vec<f32> + Send + Sync>,
         thread::JoinHandle<()>,
@@ -32,7 +37,7 @@ impl WscFFT {
         });
 
         let handle = thread::spawn(move || {
-            for mut input_buffer in r.iter() {
+            for mut input_buffer in receiver.iter() {
                 let mut fft = fft_arc_clone.lock().unwrap();
                 if let Err(e) = fft.process(&mut input_buffer) {
                     eprintln!("fft.process failed: {:?}", e);
@@ -45,17 +50,16 @@ impl WscFFT {
 
     pub fn new(buffer_size: usize) -> Self {
         let buffer = DoubleBuffer::new(buffer_size);
-        let window = hann_window(buffer_size);
+        let window = hamming_window(buffer_size);
 
-        Self { buffer, window }
-    }
+        let mut planner = FftPlanner::new();
+        let fft = planner.plan_fft_forward(buffer_size);
 
-    pub fn get_read_fn(&mut self) -> Box<dyn Fn() -> Vec<f32> + Send> {
-        let read_buffer_arc = self.read();
-        Box::new(move || {
-            let read_buffer_guard = read_buffer_arc.read().unwrap();
-            read_buffer_guard.clone()
-        })
+        Self {
+            buffer,
+            window,
+            fft,
+        }
     }
 
     pub fn read(&mut self) -> Arc<RwLock<Vec<f32>>> {
@@ -72,13 +76,136 @@ impl WscFFT {
         }
     }
 
+    fn log_bin_fft(fft_res: &Vec<Complex<f32>>) -> Vec<Complex<f32>> {
+        let min_bin = 1.0;
+        let max_bin = (fft_res.len() / 2) as f32;
+        let bins_per_octave = 12.0; // number of bins per octave
+        let min_freq = 27.5; // frequency of low A (A1)
+        let sample_rate = 44100.0; // sample rate of the audio
+        let factor = bins_per_octave / (2.0f32).log2();
+
+        let mut log_binned = vec![Complex::new(0.0, 0.0); fft_res.len()];
+        let mut bin_sums = vec![0.0; fft_res.len()];
+        let mut bin_counts = vec![0; fft_res.len()];
+
+        for (i, &value) in fft_res.iter().enumerate() {
+            if i < 2 {
+                continue;
+            } // skip DC and Nyquist
+            let freq = i as f32 * sample_rate / fft_res.len() as f32;
+            let bin = ((freq / min_freq).log2() * factor).round() as usize;
+            if bin < min_bin as usize || bin >= max_bin as usize {
+                continue;
+            }
+            log_binned[bin] += value;
+            bin_sums[bin] += value.norm();
+            bin_counts[bin] += 1;
+        }
+
+        for (bin, &count) in bin_counts.iter().enumerate() {
+            if count > 0 {
+                log_binned[bin] /= count as f32;
+            }
+        }
+
+        log_binned
+    }
+
     pub fn process(&mut self, buffer: &mut Vec<f32>) -> Result<(), Box<dyn std::error::Error>> {
-        let mut magnitude_buffer = process_buffer(buffer)?;
-        WscFFT::apply_window(&mut magnitude_buffer, &self.window);
+        WscFFT::apply_window(buffer, &self.window);
+
+        let mut complex_input: Vec<_> =
+            buffer.iter().map(|&f| Complex { re: f, im: 0.0 }).collect();
+
+        self.fft.process(&mut complex_input);
+
+        let magnitude_buffer = &mut complex_input;
+
+        for item in magnitude_buffer.iter_mut() {
+            let magnitude = item.norm().powf(0.25) * 1.25;
+            *item = Complex::new(magnitude, 0.0);
+        }
+
+        let max_magnitude = 4.5;
+
+        for item in magnitude_buffer.iter_mut() {
+            item.re /= max_magnitude;
+        }
+
+        let magnitude_buffer: Vec<f32> = magnitude_buffer.iter().map(|c| c.re).collect();
+
+        let magnitude_buffer = smooth(&magnitude_buffer, 4);
+
         self.write(magnitude_buffer)?;
 
         Ok(())
     }
+}
+
+fn low_pass_filter(buffer: &mut Vec<f32>, window_size: usize) {
+    let mut sum = 0.0;
+    let scale = 1.0 / window_size as f32;
+
+    for i in 0..buffer.len() {
+        sum = sum + buffer[i];
+
+        if i >= window_size {
+            sum = sum - buffer[i - window_size];
+        }
+
+        buffer[i] = sum * scale;
+    }
+}
+
+fn smooth(buffer: &Vec<f32>, window_size: usize) -> Vec<f32> {
+    let mut result = Vec::new();
+    let padding = vec![0.0; window_size / 2];
+    let extended_buffer = [&padding[..], &buffer[..], &padding[..]].concat();
+
+    for i in 0..buffer.len() {
+        let window = &extended_buffer[i..i + window_size];
+        let sum: f32 = window.iter().sum();
+        result.push(sum / window_size as f32);
+    }
+    result
+}
+
+fn create_mel_filter_bank(
+    num_filters: usize,
+    min_freq: f32,
+    max_freq: f32,
+    fft_size: usize,
+    sample_rate: usize,
+) -> Vec<Vec<f32>> {
+    let min_mel = 2595.0 * (1.0 + min_freq / 700.0).log10();
+    let max_mel = 2595.0 * (1.0 + max_freq / 700.0).log10();
+
+    let mels: Vec<f32> = (0..=num_filters + 1)
+        .map(|i| min_mel + (max_mel - min_mel) * i as f32 / (num_filters + 1) as f32)
+        .collect();
+
+    let freqs: Vec<f32> = mels
+        .iter()
+        .map(|&m| 700.0 * (10.0f32.powf(m / 2595.0) - 1.0))
+        .collect();
+
+    let bins: Vec<usize> = freqs
+        .iter()
+        .map(|&f| (fft_size as f32 * f / sample_rate as f32).round() as usize)
+        .collect();
+
+    let mut filters = vec![vec![0.0; fft_size / 2]; num_filters];
+
+    for i in 0..num_filters {
+        for f in bins[i]..bins[i + 1] {
+            filters[i][f] = (f - bins[i]) as f32 / (bins[i + 1] - bins[i]) as f32;
+        }
+        for f in bins[i + 1]..bins[i + 2] {
+            filters[i][f] = 1.0 - (f - bins[i + 1]) as f32 / (bins[i + 2] - bins[i + 1]) as f32;
+        }
+    }
+
+    filters
 }
 
 pub fn validate_frequency(data: Vec<f32>, freq: f32, sample_rate: f32, buffer_size: usize) {

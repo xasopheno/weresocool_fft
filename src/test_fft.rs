@@ -55,33 +55,28 @@ mod test_fft {
             Complex::new(4.0, 4.0),
         ];
 
-        // Calculate the sum of squares in the time domain
         let time_domain_sum: f32 = input.iter().map(|x| x.norm_sqr()).sum();
 
-        // Apply FFT
         fft_in_place(&mut input);
 
-        // Calculate the sum of squares in the frequency domain divided by the number of data points
         let freq_domain_sum: f32 =
             input.iter().map(|x| x.norm_sqr()).sum::<f32>() / input.len() as f32;
 
-        // They should be equal (considering float precision)
         assert!((time_domain_sum - freq_domain_sum).abs() < 1e-6);
     }
 
     #[test]
     fn test_frequency_resolution() {
-        let sample_rate = 8000.0; // Sample rate in Hz
-        let duration = 1.0; // Duration in seconds
-        let freq = 440.0; // Frequency of sine wave in Hz
-        let amplitude = 1.0; // Amplitude of sine wave
+        let sample_rate = 8000.0;
+        let duration = 1.0;
+        let freq = 440.0;
+        let amplitude = 1.0;
 
         let num_samples = (sample_rate * duration) as usize;
         let t = (0..num_samples)
             .map(|i| i as f32 / sample_rate)
             .collect::<Vec<_>>();
 
-        // Generate a sinusoidal signal
         let signal = t
             .iter()
             .map(|t| Complex::new(amplitude * (2.0 * PI * freq * t).sin(), 0.0))
@@ -89,23 +84,20 @@ mod test_fft {
 
         let mut fft_output = signal.clone();
 
-        // Perform FFT
         fft_in_place(&mut fft_output);
 
-        // Compute the magnitudes and find the index of the maximum
         let magnitudes = fft_output.iter().map(|c| c.norm()).collect::<Vec<_>>();
         let max_index = magnitudes
             .iter()
+            .take(num_samples / 2)
             .enumerate()
             .max_by(|a, b| a.1.partial_cmp(b.1).unwrap())
             .unwrap()
             .0;
 
-        // The maximum should be at the bin corresponding to the input frequency
         let expected_max_index = (freq * num_samples as f32 / sample_rate).round() as usize;
         assert_eq!(max_index, expected_max_index);
 
-        // Validate the frequency
         let recovered_freq = max_index as f32 * sample_rate / num_samples as f32;
         let freq_error = (recovered_freq - freq).abs();
         assert!(
