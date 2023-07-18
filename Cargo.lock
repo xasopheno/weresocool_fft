@@ -854,10 +854,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9193164d4de03a926d909d3bc7c30543cecb35400c02114792c2cae20d5e2dbb"
 
 [[package]]
-name = "weresocool_double_buffer"
-version = "0.1.0"
-
-[[package]]
 name = "weresocool_fft"
 version = "0.1.0"
 dependencies = [
@@ -869,8 +865,12 @@ dependencies = [
  "plotters",
  "ringbuf",
  "rustfft",
- "weresocool_double_buffer",
+ "weresocool_ring_buffer",
 ]
+
+[[package]]
+name = "weresocool_ring_buffer"
+version = "0.1.0"
 
 [[package]]
 name = "winapi"

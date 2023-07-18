@@ -1,16 +1,14 @@
 use crate::*;
 use core::f32::consts::PI;
 use crossbeam_channel as channel;
-// use ringbuf::RingBuffer;
 use rustfft::num_complex::Complex;
-use rustfft::num_traits::Zero;
 use rustfft::FftPlanner;
 use std::sync::{Arc, RwLock};
 use std::thread;
-use weresocool_double_buffer::{DoubleBuffer, DoubleBufferError};
+use weresocool_ring_buffer::{RingBuffer, RingBufferError};
 
 pub struct WscFFT {
-    buffer: DoubleBuffer<f32>,
+    buffer: RingBuffer,
     window: Vec<f32>,
     fft: Arc<dyn rustfft::Fft<f32>>,
 }
@@ -25,22 +23,28 @@ impl WscFFT {
     ) {
         let fft = WscFFT::new(buffer_size);
 
-        let fft_arc = std::sync::Arc::new(std::sync::Mutex::new(fft));
+        let fft_arc = Arc::new(RwLock::new(fft));
 
         let fft_arc_clone = fft_arc.clone();
 
         let read_fn = Box::new(move || {
-            let fft = fft_arc.lock().unwrap();
+            let fft = fft_arc.read().unwrap();
             let read_buffer_arc = fft.buffer.read();
             let read_buffer_guard = read_buffer_arc.read().unwrap();
             read_buffer_guard.to_owned()
         });
 
         let handle = thread::spawn(move || {
-            for mut input_buffer in receiver.iter() {
-                let mut fft = fft_arc_clone.lock().unwrap();
-                if let Err(e) = fft.process(&mut input_buffer) {
-                    eprintln!("fft.process failed: {:?}", e);
+            for mut large_input_buffer in receiver.iter() {
+                let mut fft = fft_arc_clone.write().unwrap();
+                let chunk_size = 1024 * 2;
+                let input_buffers: Vec<_> = large_input_buffer.chunks_mut(chunk_size).collect();
+                let mut buffer_vec: Vec<f32>;
+                for input_buffer in input_buffers {
+                    buffer_vec = input_buffer.to_vec();
+                    if let Err(e) = fft.process(&mut buffer_vec) {
+                        eprintln!("fft.process failed: {:?}", e);
+                    }
                 }
             }
         });
@@ -49,7 +53,7 @@ impl WscFFT {
     }
 
     pub fn new(buffer_size: usize) -> Self {
-        let buffer = DoubleBuffer::new(buffer_size);
+        let buffer = RingBuffer::new(buffer_size, 12);
         let window = hamming_window(buffer_size);
 
         let mut planner = FftPlanner::new();
@@ -66,7 +70,7 @@ impl WscFFT {
         self.buffer.read()
     }
 
-    pub fn write(&self, data: Vec<f32>) -> Result<(), DoubleBufferError> {
+    pub fn write(&self, data: Vec<f32>) -> Result<(), RingBufferError> {
         self.buffer.write(data)
     }
 

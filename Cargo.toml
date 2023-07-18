@@ -7,7 +7,7 @@ edition = "2021"
 
 [dependencies]
 hound = "3.5.0"
-weresocool_double_buffer = { path = "../weresocool_double_buffer" } 
+weresocool_ring_buffer = { path = "../weresocool_ring_buffer" } 
 num-complex = "0.4.3"
 num-traits = "0.2.15"
 once_cell = "1.18.0"
