@@ -16,12 +16,14 @@ pub struct WscFFT {
 impl WscFFT {
     pub fn spawn(
         buffer_size: usize,
+        ring_buffer_size: usize,
+        sample_rate: usize,
         receiver: channel::Receiver<Vec<f32>>,
     ) -> (
         Box<dyn Fn() -> Vec<f32> + Send + Sync>,
         thread::JoinHandle<()>,
     ) {
-        let fft = WscFFT::new(buffer_size);
+        let fft = WscFFT::new(buffer_size, ring_buffer_size, sample_rate);
 
         let fft_arc = Arc::new(RwLock::new(fft));
 
@@ -52,8 +54,8 @@ impl WscFFT {
         (read_fn, handle)
     }
 
-    pub fn new(buffer_size: usize) -> Self {
-        let buffer = RingBuffer::new(buffer_size, 12);
+    pub fn new(buffer_size: usize, ring_buffer_size: usize, sample_rate: usize) -> Self {
+        let buffer = RingBuffer::new(buffer_size, ring_buffer_size, sample_rate);
         let window = hamming_window(buffer_size);
 
         let mut planner = FftPlanner::new();
