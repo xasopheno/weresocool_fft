@@ -51,19 +51,16 @@ pub fn calculate_bin_freqs(fft_size: usize, sample_rate: f32) -> Vec<f32> {
         .collect::<Vec<_>>()
 }
 
-pub fn f32_to_complex(signal: &Vec<f32>) -> Vec<Complex<f32>> {
-    signal
-        .into_iter()
-        .map(|val| Complex::new(*val, 0.0))
-        .collect()
+pub fn f32_to_complex(signal: &[f32]) -> Vec<Complex<f32>> {
+    signal.iter().map(|val| Complex::new(*val, 0.0)).collect()
 }
 
 pub fn complex_to_f32(signal: Vec<Complex<f32>>) -> Vec<f32> {
     signal.into_iter().map(|val| val.re).collect()
 }
 
-pub fn process_buffer(buffer: &mut Vec<f32>) -> Result<Vec<f32>, Box<dyn std::error::Error>> {
-    let mut complex_buffer = f32_to_complex(&buffer);
+pub fn process_buffer(buffer: &mut [f32]) -> Result<Vec<f32>, Box<dyn std::error::Error>> {
+    let mut complex_buffer = f32_to_complex(buffer);
 
     fft_in_place(&mut complex_buffer);
 
@@ -79,7 +76,7 @@ pub fn draw_buffer(
     root.fill(&WHITE)?;
 
     let x: Vec<_> = (0..magnitude_buffer.len()).collect();
-    let y: Vec<_> = magnitude_buffer.iter().cloned().collect();
+    let y: Vec<_> = magnitude_buffer.to_vec();
 
     let mut chart = ChartBuilder::on(&root)
         .margin(10)

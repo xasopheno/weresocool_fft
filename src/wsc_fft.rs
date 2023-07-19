@@ -82,7 +82,7 @@ impl WscFFT {
         }
     }
 
-    fn log_bin_fft(fft_res: &Vec<Complex<f32>>) -> Vec<Complex<f32>> {
+    fn _log_bin_fft(fft_res: &Vec<Complex<f32>>) -> Vec<Complex<f32>> {
         let min_bin = 1.0;
         let max_bin = (fft_res.len() / 2) as f32;
         let bins_per_octave = 12.0; // number of bins per octave
@@ -117,7 +117,7 @@ impl WscFFT {
         log_binned
     }
 
-    pub fn process(&mut self, buffer: &mut Vec<f32>) -> Result<(), Box<dyn std::error::Error>> {
+    pub fn process(&mut self, buffer: &mut [f32]) -> Result<(), Box<dyn std::error::Error>> {
         WscFFT::apply_window(buffer, &self.window);
 
         let mut complex_input: Vec<_> =
@@ -148,15 +148,15 @@ impl WscFFT {
     }
 }
 
-fn low_pass_filter(buffer: &mut Vec<f32>, window_size: usize) {
+fn _low_pass_filter(buffer: &mut Vec<f32>, window_size: usize) {
     let mut sum = 0.0;
     let scale = 1.0 / window_size as f32;
 
     for i in 0..buffer.len() {
-        sum = sum + buffer[i];
+        sum += buffer[i];
 
         if i >= window_size {
-            sum = sum - buffer[i - window_size];
+            sum -= buffer[i - window_size]
         }
 
         buffer[i] = sum * scale;
@@ -176,7 +176,7 @@ fn smooth(buffer: &Vec<f32>, window_size: usize) -> Vec<f32> {
     result
 }
 
-fn create_mel_filter_bank(
+fn _create_mel_filter_bank(
     num_filters: usize,
     min_freq: f32,
     max_freq: f32,
