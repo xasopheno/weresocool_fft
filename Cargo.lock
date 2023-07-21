@@ -871,6 +871,9 @@ dependencies = [
 [[package]]
 name = "weresocool_ring_buffer"
 version = "0.1.0"
+dependencies = [
+ "ringbuf",
+]
 
 [[package]]
 name = "winapi"
